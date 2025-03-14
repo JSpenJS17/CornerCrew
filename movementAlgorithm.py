@@ -93,13 +93,12 @@ def main():
 
 
     #set variables
-    middleOfCamera = 320
-    lowerBoundForRamming = 220
-    upperBoundForRamming = 420
-    touchingThreshold = 30
-    lidarTouchingThreshold =1000
-    dangerThreshold = 1000
-    kP = 0.01
+    middleOfCamera = 320 #this shouldn't be changed
+    lowerBoundForRamming = 220 #increase to make it ram when it is better lined up, decrease it if it needs to ram sooner
+    upperBoundForRamming = middleOfCamera + (middleOfCamera-lowerBoundForRamming) #shouldn't need to be changed
+    touchingThreshold = 50 #thershold for how bigt the orange is to know to ram. Increase to make it wait closer to full send. Decrease to make it full send sooner
+    dangerThreshold = 50 #thershold for how close to the wall before the robot is before it moves away. Increase to make it stay further from the wall
+    kP = 0.01 #do not increase past 1/(middleOfCamera-lowerBoundForRamming), decrese to make the robot line up with the other slower
 
     #pick a random number for whether the robot should circle left or right.
     #main goal is to be unpredicatble
@@ -127,7 +126,7 @@ def main():
         if(cam.colourXvalue > lowerBoundForRamming and cam.colourXvalue < upperBoundForRamming):
 
             #ram straight into the other robot if you are really close
-            if(cam.colourSize > touchingThreshold or lid.frontDisatnce < lidarTouchingThreshold):
+            if(cam.colourSize > touchingThreshold):
                 setSpeed(1, 1, 1, 1)
 
             else:
@@ -144,17 +143,17 @@ def main():
                     setSpeed(1, 1- abs(lateralError) * kP, 1- abs(lateralError) * kP, 1)
 
         #2nd priorirt check how close to the wall the robot is
-        elif(lid.backDistance < dangerThreshold):
+        elif(lid.backDistance > dangerThreshold):
             #drive away from the wall
             setSpeed(1, 1, 1, 1)
 
         #check for objects to the right
-        elif(lid.rightDistance < dangerThreshold):
+        elif(lid.rightDistance > dangerThreshold):
             #drive away from the wall
             setSpeed(-1, 1, 1, -1)
 
         #check for objects to the left
-        elif(lid.leftDistance < dangerThreshold):
+        elif(lid.leftDistance > dangerThreshold):
             #drive away from the wall
             setSpeed(1, -1, -1, 1)
 
@@ -173,6 +172,8 @@ def main():
         #turn to try and find the other robot
         else:
             setSpeed(1, 1, -1, -1)
+
+        time.sleep(0.01)
 
 
 
