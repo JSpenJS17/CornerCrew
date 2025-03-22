@@ -35,7 +35,7 @@ class MecanumChassis:
         # distance / circumference = rotations per second
         return speed / (math.pi * self.wheel_diameter)
 
-    def set_velocity(self, linear_x, linear_y, angular_z):
+    def set_velocity(self):
         """
         Use polar coordinates to control moving
                     x
@@ -56,10 +56,10 @@ class MecanumChassis:
         # v3 = vx + vy + vp
         # v4 = vx - vy + vp
         # v_s = [self.speed_covert(v) for v in [v1, v2, -v3, -v4]]
-        motor1 = (frontLeftSpeed)
-        motor2 = (backLeftSpeed)
-        motor3 = (frontRightSpeed)
-        motor4 = (backRightSpeed)
+        motor1 = frontLeftSpeed
+        motor2 = backLeftSpeed
+        motor3 = frontRightSpeed
+        motor4 = backRightSpeed
 
         v_s = [self.speed_covert(v) for v in [-motor1, -motor2, motor3, motor4]]
         data = []
@@ -174,9 +174,5 @@ def main():
             setSpeed(1, 1, -1, -1)
 
         time.sleep(0.01)
-
-
-
-        pass
 
 main()
