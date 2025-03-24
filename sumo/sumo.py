@@ -3,9 +3,7 @@ import rclpy
 from rclpy.node import Node
 from interfaces.msg import ColorsInfo
 from sensor_msgs.msg import LaserScan
-import random
-import time
-import math
+import random, time, math, sys, signal
 from ros_robot_controller_msgs.msg import MotorState, MotorsState
 
 frontLeftSpeed = 0
@@ -14,7 +12,8 @@ frontRightSpeed = 0
 backRightSpeed = 0
 
 def setSpeed(fl, bl, fr, br):
-    maxSpeedConstant = 0.61
+    global frontLeftSpeed, backLeftSpeed, frontRightSpeed, backRightSpeed
+    maxSpeedConstant = 0.25
     frontLeftSpeed = fl *maxSpeedConstant
     backLeftSpeed = bl *maxSpeedConstant
     frontRightSpeed = fr *maxSpeedConstant
@@ -114,7 +113,10 @@ class SumoNode(Node):
         self.lidar = Lidar(None, None, None, None)
         self.detected_color = False
 
-        self.mecanum = MecanumChassis()
+        # init motor publisher
+        self.motor_pub = self.create_publisher(MotorsState, 'ros_robot_controller/set_motor', 1)
+        # init mecanum chassis controller object
+        self.mecanum = MecanumChassis()    
 
         #pick a random number for whether the robot should circle left or right.
         #main goal is to be unpredicatble
@@ -124,8 +126,13 @@ class SumoNode(Node):
             setSpeed(-1, 1, -1, -1)
 
         # intial movment to try and dodge out of the opponenets way
+        self.set_velocity()
         time.sleep(0.5)
 
+    def set_velocity(self):
+        # print(f"Setting velocity to: ({frontLeftSpeed}, {backLeftSpeed}, {frontRightSpeed}, {backRightSpeed})")
+        speeds = self.mecanum.set_velocity()
+        self.motor_pub.publish(speeds)
 
     def update_data(self, msg):
         # self.get_logger().info(f"{msg.intensities[0]}") # print some lidar data for now
@@ -202,7 +209,7 @@ class SumoNode(Node):
             self.lidar.rightDistance = sums["right"][0]/sums["right"][1]
             self.lidar.frontDistance = sums["front"][0]/sums["front"][1]
 
-            # neat printout to make sure it's working, the .25 is arbitrary and VERY close
+            # # neat printout to make sure it's working, the .25 is arbitrary and VERY close
             # if self.lidar.leftDistance < .25:
             #     print("Close left")
             # elif self.lidar.backDistance < .25:
@@ -218,35 +225,38 @@ class SumoNode(Node):
         self.move()
 
         # that will update the speeds, so now we send them to the motors
-        self.mecanum.set_velocity()
+        self.set_velocity()
 
     def move(self):
         # make sure lidar and camera data exists
         if self.lidar.frontDistance == None:
             print("No lidar data")
-            return
+            return            print(self.lidar.backDistance)
+
         elif self.camera.colourXvalue == None:
             print("No camera data")
             return
 
         #set variables
         middleOfCamera = 320 #this shouldn't be changed
-        lowerBoundForRamming = 220 #increase to make it ram when it is better lined up, decrease it if it needs to ram sooner
+        lowerBoundForRamming = 110 #increase to make it ram when it is better lined up, decrease it if it needs to ram sooner
         upperBoundForRamming = middleOfCamera + (middleOfCamera-lowerBoundForRamming) #shouldn't need to be changed
-        touchingThreshold = 50 #thershold for how big the orange is to know to ram. Increase to make it wait closer to full send. Decrease to make it full send sooner
-        dangerThreshold = 50 #thershold for how close to the wall before the robot is before it moves away. Increase to make it stay further from the wall
+        touchingThreshold = 25 #thershold for how big the orange is to know to ram. Increase to make it wait closer to full send. Decrease to make it full send sooner
+        dangerThreshold = .5 #thershold for how close to the wall before the robot is before it moves away. Increase to make it stay further from the wall
         kP = 0.01 #do not increase past 1/(middleOfCamera-lowerBoundForRamming), decrese to make the robot line up with the other slower
 
         #1st priority is to ram into an opponenet if we are lined up perfectly
         if(self.camera.colourXvalue > lowerBoundForRamming and self.camera.colourXvalue < upperBoundForRamming):
             #ram straight into the other robot if you are really close
             if(self.camera.colourSize > touchingThreshold):
+                print("Ramming!!!")
                 setSpeed(1, 1, 1, 1)
 
             else:
                 #using strafing capabilites of mecanum drive to better line up with the target while ramming
                 lateralError = self.camera.colourXvalue-middleOfCamera
 
+                print("Strafing towards opponents")
                 #execute this if the target is left of the centre 
                 if(lateralError < 0):
                     #to strafe left slightly, give the front left and back right wheels less power
@@ -257,27 +267,31 @@ class SumoNode(Node):
                     setSpeed(1, 1- abs(lateralError) * kP, 1- abs(lateralError) * kP, 1)
 
         #2nd priorirt check how close to the wall the robot is
-        elif(self.lidar.backDistance > dangerThreshold):
+        elif(self.lidar.backDistance < dangerThreshold):
+            print("Back Danger Threshold hit")
             #drive away from the wall
             setSpeed(1, 1, 1, 1)
 
         #check for objects to the right
-        elif(self.lidar.rightDistance > dangerThreshold):
+        elif(self.lidar.rightDistance < dangerThreshold):
+            print("Right Danger Threshold hit")
             #drive away from the wall
             setSpeed(-1, 1, 1, -1)
 
         #check for objects to the left
-        elif(self.lidar.leftDistance > dangerThreshold):
+        elif(self.lidar.leftDistance < dangerThreshold):
+            print("Left Danger Threshold hit")
             #drive away from the wall
             setSpeed(1, -1, -1, 1)
 
         #3rd priorty is prepare to ram the other team
         elif(self.camera.colourSize != -1):
+            print("Turning to face opponent")
             #object is too far to the left
             if(self.camera.colourXvalue < middleOfCamera):
                 #turn to the right
                 setSpeed(-1, 1, -1, -1)
-            #object too dar to the right
+            #object too far to the right
             else:
                 #turn to the left
                 setSpeed(-1, -1, -1, 1)
@@ -285,16 +299,24 @@ class SumoNode(Node):
 
         #turn to try and find the other robot
         else:
+            print("No robot found, turning to find")
             setSpeed(1, 1, -1, -1)
-
-
             
+def sigint_handler(sig, frame):
+    sumo = SumoNode("sumo_node_die")
+    setSpeed(0, 0, 0, 0)
+    sumo.set_velocity()
+    sys.exit(0)
+
 def main():
     rclpy.init()
+    signal.signal(signal.SIGINT, sigint_handler)
 
     sumo = SumoNode("sumo_node")
 
     rclpy.spin(sumo)
+
+    sumo.destroy_node()
 
 
 if __name__ == '__main__':
