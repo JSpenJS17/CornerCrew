@@ -127,6 +127,7 @@ class SumoNode(Node):
         self.create_subscription(ColorsInfo, '/color_detect/color_info', self.update_data, 10)
         self.lidar_sub = self.create_subscription(LaserScan, '/scan_raw', self.update_data, 10)
 
+
         if die:
             print("Dying!")
             setSpeed(0, 0, 0, 0)
@@ -134,8 +135,17 @@ class SumoNode(Node):
             return
         
         self.leftOrRight = random.random() < .5
-        self.count = 0
+        self.count = 15
 
+        input("Press enter to start")
+        if self.leftOrRight:
+            setSpeed(1, -1, -1, 1)
+        else:
+            setSpeed(-1, 1, 1, -1)
+
+        self.set_velocity()
+
+        time.sleep(.5)
         
         
 
@@ -290,7 +300,7 @@ class SumoNode(Node):
         
 
         #1st priority is to ram into an opponenet if we are lined up perfectly
-        if (self.count < 12):
+        if (self.count < 1):
             print(self.count)
             #pick a random number for whether the robot should circle left or right.
             #main goal is to be unpredicatble
@@ -303,13 +313,21 @@ class SumoNode(Node):
 
         elif(self.count > 30):
             setSpeed(1, 1, 1, 1)
+            if self.lidar.right < dangerThreshold * (3/5):
+                setSpeed(-1, 1, 1, -1)
+            elif self.lidar.left < dangerThreshold * (3/5):
+                setSpeed(1, -1, -1, 1)
+            #elif self.camera.colourSize == -1 and self.lidar.front < dangerThreshold * (3/5) and count < 50:
+            #    print("Ram failed, backing off")
+            #    setSpeed(-1, -1, -1, -1)
+            #    count = 30
             self.count -= 1
 
         #ram straight into the other robot if you are really close
         elif(self.camera.colourSize > touchingThreshold):
             print("Ramming!!!")
             setSpeed(1, 1, 1, 1)
-            self.count = 40
+            self.count = 60
 
         elif(self.camera.colourXvalue > 0 and self.camera.colourXvalue < middleOfCamera * 2):
             print("Strafing towards opponents")
@@ -357,6 +375,8 @@ class SumoNode(Node):
 
             else:
                 print("front/frontLeft/frontRight Danger Threshold hit, ignoring")
+
+
 
         #3rd priorty is prepare to ram the other team
         elif(self.camera.colourSize != -1):
