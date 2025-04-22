@@ -18,18 +18,14 @@ from rclpy.node import Node
 from cv_bridge import CvBridge
 from std_srvs.srv import Trigger
 from sensor_msgs.msg import Image
-from interfaces.msg import ColorInfo, ColorsInfo
-from interfaces.srv import SetColorDetectParam, SetCircleROI, SetLineROI
+from rclpy.callback_groups import ReentrantCallbackGroup
+from interfaces.msg import ColorInfo, ColorsInfo, ColorDetect
+from interfaces.srv import SetColorDetectParam, SetCircleROI, SetLineROI, SetString
 
 class ColorDetectNode(Node):
     def __init__(self, name):
         rclpy.init()
         super().__init__(name, allow_undeclared_parameters=True, automatically_declare_parameters_from_overrides=True)
-
-        # init motor publisher (dancing! :D)
-        self.motor_pub = self.create_publisher(MotorsState, 'ros_robot_controller/set_motor', 1)
-        # init mecanum chassis controller object
-        self.mecanum = MecanumChassis()    
 
         # declare class variables
         self.name = name
@@ -76,16 +72,41 @@ class ColorDetectNode(Node):
         self.create_service(Trigger, '~/start', self.start_srv_callback)
         self.create_service(Trigger, '~/stop', self.stop_srv_callback)
 
+        timer_cb_group = ReentrantCallbackGroup()
+        self.create_service(SetString, '~/set_color', self.set_color_srv_callback, callback_group=timer_cb_group) # 设置颜色(set color)
+        self.set_color_client = self.create_client(SetColorDetectParam, '/color_detect/set_param', callback_group=timer_cb_group)
+        self.set_color_client.wait_for_service()
+
         # run self.main on its own thread headlessly
         threading.Thread(target=self.main).start()
-        # self.create_service(Trigger, '~/init_finish', self.get_node_state)
-
-
+        self.create_service(Trigger, '~/init_finish', self.get_node_state)
 
     def get_node_state(self, request, response):
         response.success = True
         return response
 
+    def send_request(self, client, msg):
+        future = client.call_async(msg)
+        while rclpy.ok():
+            if future.done() and future.result():
+                return future.result()
+
+    def set_color_srv_callback(self, request, response):
+        self.get_logger().info('\033[1;32m%s\033[0m' % "set_color")
+        msg = SetColorDetectParam.Request()
+        msg_red = ColorDetect()
+        msg_red.color_name = request.data
+        msg_red.detect_type = 'circle'
+        msg.data = [msg_red]
+        res = self.send_request(self.set_color_client, msg)
+        if res.success:
+            self.get_logger().info('\033[1;32m%s\033[0m' % 'start_track_%s'%msg_red.color_name)
+        else:
+            self.get_logger().info('\033[1;32m%s\033[0m' % 'track_fail')
+        response.success = True
+        response.message = "set_color"
+        return response
+        
 
     # start service callback
     def start_srv_callback(self, request, response):
@@ -223,71 +244,6 @@ class ColorDetectNode(Node):
         # finally, put the image into the queue
         self.image_queue.put(bgr_image)
 
-
-    def set_velocity(self, linear_x, linear_y, angular_z):
-        speeds = self.mecanum.set_velocity(linear_x, linear_y, angular_z)
-        self.motor_pub.publish(speeds)
-
-
-# Grabbed straight from their code
-class MecanumChassis:
-    # wheelbase = 0.1368   # 前后轴距(distance between front and real axles)
-    # track_width = 0.1446 # 左右轴距(distance between left and right axles)
-    # wheel_diameter = 0.065  # 轮子直径(wheel diameter)
-    def __init__(self, wheelbase=0.1368, track_width=0.1410, wheel_diameter=0.065):
-        self.wheelbase = wheelbase
-        self.track_width = track_width
-        self.wheel_diameter = wheel_diameter
-
-    def speed_covert(self, speed):
-        """
-        covert speed m/s to rps/s
-        :param speed:
-        :return:
-        """
-        # distance / circumference = rotations per second
-        return speed / (math.pi * self.wheel_diameter)
-
-    def set_velocity(self, linear_x, linear_y, angular_z):
-        """
-        Use polar coordinates to control moving
-                    x
-        v1 motor1|  ↑  |motor3 v3
-          +  y - |     |
-        v2 motor2|     |motor4 v4
-        :param speed: m/s
-        :param direction: Moving direction 0~2pi, 1/2pi<--- ↑ ---> 3/2pi
-        :param angular_rate:  The speed at which the chassis rotates rad/sec
-        :param fake:
-        :return:
-        """
-        # vx = speed * math.sin(direction)
-        # vy = speed * math.cos(direction)
-        # vp = angular_rate * (self.wheelbase + self.track_width) / 2
-        # v1 = vx - vy - vp
-        # v2 = vx + vy - vp
-        # v3 = vx + vy + vp
-        # v4 = vx - vy + vp
-        # v_s = [self.speed_covert(v) for v in [v1, v2, -v3, -v4]]
-        motor1 = (linear_x - linear_y - angular_z * (self.wheelbase + self.track_width) / 2)
-        motor2 = (linear_x + linear_y - angular_z * (self.wheelbase + self.track_width) / 2)
-        motor3 = (linear_x + linear_y + angular_z * (self.wheelbase + self.track_width) / 2)
-        motor4 = (linear_x - linear_y + angular_z * (self.wheelbase + self.track_width) / 2)
-
-        v_s = [self.speed_covert(v) for v in [-motor1, -motor2, motor3, motor4]]
-        data = []
-        for i in range(len(v_s)):
-            msg = MotorState()
-            msg.id = i + 1
-            msg.rps = float(v_s[i])
-            data.append(msg)
-        
-        msg = MotorsState()
-        msg.data = data
-        return msg
-
-
-
 def main():
     # make the node
     node = ColorDetectNode('color_detect')
@@ -302,4 +258,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
